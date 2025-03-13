@@ -768,10 +768,23 @@ class CheckTypeVisitor(VariableTypeVisitor):
         self.ast_type_map.set(bit_string_type, bit_string_type)
 
     def leave_array_access(self, array_access: frog_ast.ArrayAccess) -> None:
+        array_type = self.get_type_from_ast(array_access.the_array)
+        
+        # Handle Map indexing - maps can have dynamic (non-constant) indices
+        if isinstance(array_type, frog_ast.MapType):
+            index_type = self.get_type_from_ast(array_access.index)
+            if not compare_types(array_type.key_type, index_type):
+                self.print_error(
+                    array_access, f"Map key type {array_type.key_type} doesn't match index type {index_type}"
+                )
+                return
+            self.ast_type_map.set(array_access, array_type.value_type)
+            return
+            
+        # Handle array/tuple indexing - requires integer constant indices
         if not isinstance(array_access.index, frog_ast.Integer):
             self.print_error(array_access, "Index must be an integer constant")
             return
-        array_type = self.get_type_from_ast(array_access.the_array)
         if not isinstance(array_type, frog_ast.BinaryOperation):
             self.print_error(
                 array_access, f"Must access a tuple type, received {array_type}"
@@ -966,26 +979,38 @@ class CheckTypeVisitor(VariableTypeVisitor):
                 ),
             )
         elif bin_op.operator == frog_ast.BinaryOperators.IN:
-            if not isinstance(right_type, frog_ast.SetType):
+            if not isinstance(right_type, (frog_ast.SetType, frog_ast.MapType)):
                 self.print_error(
                     bin_op,
-                    f"{bin_op.right_expression} is of type {right_type}, expected Set",
+                    f"{bin_op.right_expression} is of type {right_type}, expected Set or Map",
                 )
                 return
-            if not right_type.parameterization:
-                self.print_error(
-                    bin_op,
-                    f"Set type for {bin_op.right_expression} must be parameterized",
-                )
-                return
-            if not compare_types(right_type.parameterization, left_type):
-                self.print_error(
-                    bin_op, f"Cannot see if {left_type} is in {right_type}"
-                )
+                
+            if isinstance(right_type, frog_ast.SetType):
+                if not right_type.parameterization:
+                    self.print_error(
+                        bin_op,
+                        f"Set type for {bin_op.right_expression} must be parameterized",
+                    )
+                    return
+                if not compare_types(right_type.parameterization, left_type):
+                    self.print_error(
+                        bin_op, f"Cannot see if {left_type} is in {right_type}"
+                    )
+            elif isinstance(right_type, frog_ast.MapType):
+                # For maps, the left type should match the key type
+                if not compare_types(right_type.key_type, left_type):
+                    self.print_error(
+                        bin_op, f"Cannot check if {left_type} is a key in map with key type {right_type.key_type}"
+                    )
+                    
             self.ast_type_map.set(bin_op, frog_ast.BoolType())
 
     def leave_integer(self, num: frog_ast.Integer) -> None:
         self.ast_type_map.set(num, frog_ast.IntType())
+
+    def leave_boolean(self, bool_val: frog_ast.Boolean) -> None:
+        self.ast_type_map.set(bool_val, frog_ast.BoolType())
 
     def leave_tuple(self, the_tuple: frog_ast.Tuple) -> None:
         types: list[frog_ast.Type] = []
