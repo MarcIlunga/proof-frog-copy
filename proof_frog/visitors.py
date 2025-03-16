@@ -1623,3 +1623,64 @@ class RemoveUnreachableTransformer(BlockTransformer):
                 return frog_ast.Block(block.statements[: index + 1])
 
         return block
+
+
+class ExhaustiveConditionMergeTransformer(BlockTransformer):
+    def __init__(self, ast: frog_ast.ASTNode) -> None:
+        self.ast = ast
+        
+    def _transform_block_wrapper(self, block: frog_ast.Block) -> frog_ast.Block:
+        for index in range(len(block.statements) - 1):
+            # Check for consecutive if statements
+            if (isinstance(block.statements[index], frog_ast.IfStatement) and 
+                isinstance(block.statements[index + 1], frog_ast.IfStatement)):
+                
+                if1 = block.statements[index]
+                if2 = block.statements[index + 1]
+                
+                # For now, only handle simple if statements with a single condition
+                if len(if1.conditions) != 1 or len(if2.conditions) != 1:
+                    continue
+                    
+                # Check if the blocks are identical
+                if if1.blocks[0] == if2.blocks[0]:
+                    # Check if conditions are logically complementary (e.g., b and !b)
+                    if self._conditions_are_exhaustive(if1.conditions[0], if2.conditions[0]):
+                        # Replace the two if statements with the content of one block
+                        return self.transform_block(
+                            frog_ast.Block(
+                                block.statements[:index] + 
+                                if1.blocks[0].statements + 
+                                block.statements[index+2:]
+                            )
+                        )
+        
+        return block
+    
+    def _conditions_are_exhaustive(self, cond1: frog_ast.Expression, cond2: frog_ast.Expression) -> bool:
+        # Simple case: check if one is the NOT of the other
+        if (isinstance(cond2, frog_ast.UnaryOperation) and 
+            cond2.operator == frog_ast.UnaryOperators.NOT and
+            cond2.expression == cond1):
+            return True
+        
+        if (isinstance(cond1, frog_ast.UnaryOperation) and 
+            cond1.operator == frog_ast.UnaryOperators.NOT and
+            cond1.expression == cond2):
+            return True
+            
+        # Use Z3 to check if conditions form a tautology
+        type_map = GetTypeMapVisitor(cond1).visit(self.ast)
+        
+        formula1 = Z3FormulaVisitor(type_map).visit(cond1)
+        formula2 = Z3FormulaVisitor(type_map).visit(cond2)
+        
+        if formula1 is None or formula2 is None:
+            return False
+            
+        # Check if (cond1 OR cond2) is a tautology
+        solver = z3.Solver()
+        solver.add(z3.Not(z3.Or(formula1, formula2)))
+        return solver.check() == z3.unsat
+
+
