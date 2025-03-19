@@ -368,6 +368,12 @@ class ProofEngine:
                 ),
                 name="Remove unreachable blocks of code",
             ),
+            AstManipulator(
+                fn=lambda ast: visitors.ExhaustiveConditionMergeTransformer(ast).transform(
+                    ast
+                ),
+                name="Merge Exhaustive Conditions",
+            ),
         ]
 
         for index, game in enumerate((current_game_ast, next_game_ast)):

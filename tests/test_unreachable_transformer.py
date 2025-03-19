@@ -351,6 +351,19 @@ from proof_frog import visitors, frog_parser
             }
             """,
         ),
+        (
+            """
+            MessageSpace? Decrypt(CiphertextSpace * PRFRangeSpace ctxt) { 
+                return None;
+                return E.Dec(field1, ctxt[0]);
+            }
+            """,
+            """
+            MessageSpace? Decrypt(CiphertextSpace * PRFRangeSpace ctxt) { 
+                return None;
+            }
+            """,
+        ),
     ],
 )
 def test_unreachable_transformer(

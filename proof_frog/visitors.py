@@ -1035,7 +1035,6 @@ class CollapseAssignmentTransformer(BlockTransformer):
                         + block.statements[index + later_index + 2 :]
                     )
                 )
-
         return block
 
 
@@ -1419,9 +1418,10 @@ class SimplifyTupleTransformer(Transformer):
         ):
             return the_tuple
 
-        type_map = GetTypeMapVisitor(the_tuple).visit(self.ast)
+        type_map = GetTypeMapVisitor(self.ast).visit(self.ast)
         tuple_type = type_map.get(tuple_val_name)
-        assert isinstance(tuple_type, frog_ast.BinaryOperation)
+        if tuple_type is None or not isinstance(tuple_type, frog_ast.BinaryOperation):
+            return the_tuple
         expanded_type_array = frog_ast.expand_tuple_type(tuple_type)
         if len(expanded_type_array) == len(the_tuple.values):
             return frog_ast.Variable(tuple_val_name)
@@ -1540,6 +1540,15 @@ class RemoveUnreachableTransformer(BlockTransformer):
         self.ast = ast
 
     def _transform_block_wrapper(self, block: frog_ast.Block) -> frog_ast.Block:
+        # First, handle simple case of consecutive statements with returns
+        for index, statement in enumerate(block.statements):
+            if isinstance(statement, frog_ast.ReturnStatement):
+                # Found a return statement - everything after is unreachable
+                if index < len(block.statements) - 1:
+                    return frog_ast.Block(block.statements[:index+1])
+                break
+        
+        # Original implementation for conditional logic
         def contains_unconditional_return(block: frog_ast.Block) -> bool:
             return any(
                 isinstance(statement, frog_ast.ReturnStatement)
@@ -1672,8 +1681,9 @@ class ExhaustiveConditionMergeTransformer(BlockTransformer):
         # Use Z3 to check if conditions form a tautology
         type_map = GetTypeMapVisitor(cond1).visit(self.ast)
         
-        formula1 = Z3FormulaVisitor(type_map).visit(cond1)
-        formula2 = Z3FormulaVisitor(type_map).visit(cond2)
+        # Initialize with empty dictionary for variable_version_map
+        formula1 = Z3FormulaVisitor(type_map, {}).visit(cond1)
+        formula2 = Z3FormulaVisitor(type_map, {}).visit(cond2)
         
         if formula1 is None or formula2 is None:
             return False
